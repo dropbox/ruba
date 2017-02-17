@@ -28,13 +28,13 @@ pub struct CompiledQuery<'a> {
     subqueries: Vec<CompiledSingleBatchQuery<'a>>,
     output_colnames: Vec<Rc<String>>,
     aggregate: Vec<Aggregator>,
+    compiled_order_by: Expr<'a>,
     limit: Option<LimitClause>,
 }
 
 struct CompiledSingleBatchQuery<'a> {
     select: Vec<Expr<'a>>,
     filter: Expr<'a>,
-    order_by: Expr<'a>,
     aggregate: Vec<(Aggregator, Expr<'a>)>,
     coliter: Vec<ColIter<'a>>,
 }
@@ -120,7 +120,10 @@ impl<'a> CompiledQuery<'a> {
             (result, combined_results.stats)
         };
 
-        // Ideally sort here
+        let sorted_result_rows_A = &result_rows.sort_by_key(|record| self.compiled_order_by.eval(record));
+        // let sorted_result_rows_B = result_rows.sort_by(|a, b|
+        //     self.compiled_order_by.eval(a).cmp(self.compiled_order_by.eval(b))
+        // );
 
         let limited_result_rows = match &self.limit {
             &Some(ref limit) => result_rows.into_iter()
@@ -198,11 +201,20 @@ impl<'a> Query<'a> {
     pub fn compile(&'a self, source: &'a Vec<Batch>) -> CompiledQuery<'a> {
         let subqueries = source.iter().map(|batch| self.compile_for_batch(batch)).collect();
         let limit = self.limit.clone();
-        println!("{:?}", self.order_by);
+
+        // Compile the order_by
+        let output_colnames = self.result_column_names();    // Prevent moving of `self.order_by`
+        let mut output_colmap = HashMap::new();
+        for (i, output_colname) in output_colnames.iter().enumerate() {
+            output_colmap.insert(output_colname.to_string(), i);
+        }
+        let compiled_order_by = self.order_by.compile(&output_colmap);
+
         CompiledQuery {
             subqueries: subqueries,
-            output_colnames: self.result_column_names(),
+            output_colnames: output_colnames,
             aggregate: self.aggregate.iter().map(|&(aggregate, _)| aggregate).collect(),
+            compiled_order_by: compiled_order_by,
             limit: limit,
         }
     }
@@ -214,12 +226,10 @@ impl<'a> Query<'a> {
         let column_indices = create_colname_map(&efficient_source);
         let compiled_selects = self.select.iter().map(|expr| expr.compile(&column_indices)).collect();
         let compiled_filter = self.filter.compile(&column_indices);
-        let compiled_order_by = self.order_by.compile(&column_indices);
         let compiled_aggregate = self.aggregate.iter().map(|&(agg, ref expr)| (agg, expr.compile(&column_indices))).collect();
         CompiledSingleBatchQuery {
             select: compiled_selects,
             filter: compiled_filter,
-            order_by: compiled_order_by,
             aggregate: compiled_aggregate,
             coliter: coliter,
         }
