@@ -20,6 +20,7 @@ pub struct Query<'a> {
     pub select: Vec<Expr<'a>>,
     pub filter: Expr<'a>,
     pub aggregate: Vec<(Aggregator, Expr<'a>)>,
+    pub order_by: Expr<'a>,
     pub limit: Option<LimitClause>,
 }
 
@@ -33,6 +34,7 @@ pub struct CompiledQuery<'a> {
 struct CompiledSingleBatchQuery<'a> {
     select: Vec<Expr<'a>>,
     filter: Expr<'a>,
+    order_by: Expr<'a>,
     aggregate: Vec<(Aggregator, Expr<'a>)>,
     coliter: Vec<ColIter<'a>>,
 }
@@ -117,13 +119,15 @@ impl<'a> CompiledQuery<'a> {
             }
             (result, combined_results.stats)
         };
+
+        // Ideally sort here
+
         let limited_result_rows = match &self.limit {
             &Some(ref limit) => result_rows.into_iter()
                                      .skip(limit.offset as usize)
                                      .take(limit.limit as usize).collect(),
             &None => result_rows,
         };
-
 
         QueryResult {
             colnames: colnames,
@@ -194,6 +198,7 @@ impl<'a> Query<'a> {
     pub fn compile(&'a self, source: &'a Vec<Batch>) -> CompiledQuery<'a> {
         let subqueries = source.iter().map(|batch| self.compile_for_batch(batch)).collect();
         let limit = self.limit.clone();
+        println!("{:?}", self.order_by);
         CompiledQuery {
             subqueries: subqueries,
             output_colnames: self.result_column_names(),
@@ -209,10 +214,12 @@ impl<'a> Query<'a> {
         let column_indices = create_colname_map(&efficient_source);
         let compiled_selects = self.select.iter().map(|expr| expr.compile(&column_indices)).collect();
         let compiled_filter = self.filter.compile(&column_indices);
+        let compiled_order_by = self.order_by.compile(&column_indices);
         let compiled_aggregate = self.aggregate.iter().map(|&(agg, ref expr)| (agg, expr.compile(&column_indices))).collect();
         CompiledSingleBatchQuery {
             select: compiled_selects,
             filter: compiled_filter,
+            order_by: compiled_order_by,
             aggregate: compiled_aggregate,
             coliter: coliter,
         }
@@ -289,4 +296,3 @@ fn format_results(colnames: &Vec<Rc<String>>, rows: &Vec<Vec<ValueType>>) -> Str
 
     fmt_table(&strcolnames, &strrows)
 }
-

@@ -22,10 +22,14 @@ named!(full_query<&[u8], Query>,
         multispace >>
         filter: expr >>
         opt!(multispace) >>
+        tag_no_case!("order_by") >>
+        multispace >>
+        order_by: expr >>
+        opt!(multispace) >>
         limit: opt!(limit_clause) >>
         opt!(multispace) >>
         char!(';') >>
-        (construct_query(select, filter, limit))
+        (construct_query(select, filter, order_by, limit))
     )
 );
 
@@ -35,16 +39,20 @@ named!(simple_query<&[u8], Query>,
         multispace >>
         select: select_clauses >>
         opt!(multispace) >>
+        tag_no_case!("order_by") >>
+        multispace >>
+        order_by: expr >>
+        opt!(multispace) >>
         limit: opt!(limit_clause) >>
         opt!(multispace) >>
         opt!(char!(';')) >>
-        (construct_query(select, Expr::Const(ValueType::Bool(true)), limit))
+        (construct_query(select, Expr::Const(ValueType::Bool(true)), order_by, limit))
     )
 );
 
-fn construct_query<'a>(select_clauses: Vec<AggregateOrSelect<'a>>, filter: Expr<'a>, limit: Option<LimitClause>) -> Query<'a> {
+fn construct_query<'a>(select_clauses: Vec<AggregateOrSelect<'a>>, filter: Expr<'a>, order_by: Expr<'a>, limit: Option<LimitClause>) -> Query<'a> {
     let (select, aggregate) = partition(select_clauses);
-    Query { select: select, filter: filter, aggregate: aggregate, limit: limit }
+    Query { select: select, filter: filter, aggregate: aggregate, order_by: order_by, limit: limit }
 }
 
 fn partition<'a>(select_or_aggregates: Vec<AggregateOrSelect<'a>>) -> (Vec<Expr<'a>>, Vec<(Aggregator, Expr<'a>)>) {
@@ -69,7 +77,7 @@ named!(select_clauses<&[u8], Vec<AggregateOrSelect>>,
     )
 );
 
-named!(aggregate_clause<&[u8], AggregateOrSelect>, 
+named!(aggregate_clause<&[u8], AggregateOrSelect>,
     do_parse!(
         opt!(multispace) >>
         atype: aggregate_func >>
@@ -94,7 +102,7 @@ named!(sum<&[u8], Aggregator>,
 );
 
 
-named!(expr<&[u8], Expr>, 
+named!(expr<&[u8], Expr>,
     do_parse!(
         opt!(multispace) >>
         result: alt!(function | colname | constant) >>
