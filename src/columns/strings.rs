@@ -5,13 +5,20 @@ use std::collections::hash_set::HashSet;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::str;
-use std::{u8, u16};
+use std::{u8, u16, usize};
+use std::iter::FromIterator;
+use std::slice;
+use std::iter;
+use num::NumCast;
+use std::ops::Deref;
+use std::marker::PhantomData;
 
 pub const MAX_UNIQUE_STRINGS: usize = 10000;
 
 pub fn build_string_column(values: Vec<Option<Rc<String>>>, unique_values: UniqueValues<Option<Rc<String>>>) -> Box<ColumnData> {
     if let Some(u) = unique_values.get_values() {
-        Box::new(DictEncodedStrings::from_strings(&values, u))
+        // Box::new(DictEncodedStrings::<Vec<u8>>::from_strings(&values, u));
+        panic!("TODO")
     } else {
         Box::new(StringPacker::from_strings(&values))
     }
@@ -91,58 +98,88 @@ impl<'a> Iterator for StringPackerIterator<'a> {
     }
 }
 
-struct DictEncodedStrings {
-    mapping: Vec<Option<String>>,
-    encoded_values: Vec<u16>,
+trait PackedStore<'a, T>: HeapSizeOf + FromIterator<T> {
+    type Iter: Iterator<Item=T> + 'a;
+    fn iter(&'a self) -> Self::Iter;
 }
 
-impl DictEncodedStrings {
-    pub fn from_strings(strings: &Vec<Option<Rc<String>>>, unique_values: HashSet<Option<Rc<String>>>) -> DictEncodedStrings {
-        assert!(unique_values.len() <= u16::MAX as usize);
+impl<'a, T> PackedStore<'a, T> for Vec<T> where T: Copy + HeapSizeOf + 'a {
+    type Iter = iter::Cloned<slice::Iter<'a, T>>;
 
-        let mapping: Vec<Option<String>> = unique_values.into_iter().map(|o| o.map(|s| s.as_str().to_owned())).collect();
-        let encoded_values: Vec<u16> = {
-            let reverse_mapping: HashMap<Option<&String>, u16> = mapping.iter().map(Option::as_ref).zip(0..).collect();
-            strings.iter().map(|o| reverse_mapping[&o.as_ref().map(|x| &**x)]).collect()
-        };
-
-        // println!("\tMapping: {}MB; values: {}MB",
-        //          mapping.heap_size_of_children() as f64 / 1024f64 / 1024f64,
-        //          encoded_values.heap_size_of_children() as f64 / 1024f64 / 1024f64);
-
-        DictEncodedStrings { mapping: mapping, encoded_values: encoded_values }
+    fn iter(&'a self) -> Self::Iter {
+        self.deref().iter().cloned()
     }
 }
 
-pub struct DictEncodedStringsIterator<'a> {
-    data: &'a DictEncodedStrings,
+struct SomeStruct<'a, T: 'a, I: PackedStore<'a, T>> {
+    storage: I,
+    phantom: PhantomData<&'a T>,
+}
+
+impl<'a, T: 'a, I: PackedStore<'a, T>> SomeStruct<'a, T, I> {
+    fn f(&'a self) -> Box<Iterator<Item=T> + 'a> {
+        Box::new(self.storage.iter())
+    }
+}
+
+fn test<'a>() {
+    let specialized1 = SomeStruct { storage: Vec::<u8>::new(), phantom: PhantomData };
+    let specialized1 = SomeStruct { storage: Vec::<u16>::new(), phantom: PhantomData };
+}
+
+
+struct DictEncodedStrings<S> {
+    mapping: Vec<Option<String>>,
+    encoded_values: S,
+}
+
+// impl<S: IndexStorage> DictEncodedStrings<S> {
+//     pub fn from_strings(strings: &Vec<Option<Rc<String>>>, unique_values: HashSet<Option<Rc<String>>>) -> DictEncodedStrings<S> {
+//         assert!(unique_values.len() <= u16::MAX as usize);
+
+//         let mapping: Vec<Option<String>> = unique_values.into_iter().map(|o| o.map(|s| s.as_str().to_owned())).collect();
+//         let encoded_values: S = {
+//             let reverse_mapping: HashMap<Option<&String>, usize> = mapping.iter().map(Option::as_ref).zip(0..).collect();
+//             strings.iter().map(|o| reverse_mapping[&o.as_ref().map(|x| &**x)]).collect()
+//         };
+
+//         // println!("\tMapping: {}MB; values: {}MB",
+//         //          mapping.heap_size_of_children() as f64 / 1024f64 / 1024f64,
+//         //          encoded_values.heap_size_of_children() as f64 / 1024f64 / 1024f64);
+
+//         DictEncodedStrings { mapping: mapping, encoded_values: encoded_values }
+//     }
+// }
+
+pub struct DictEncodedStringsIterator<'a, S> where S: 'a {
+    data: &'a DictEncodedStrings<S>,
     i: usize,
 }
 
-impl<'a> Iterator for DictEncodedStringsIterator<'a> {
-    type Item = Option<&'a str>;
+// impl<'a, S: IndexStorage> Iterator for DictEncodedStringsIterator<'a, S> {
+//     type Item = Option<&'a str>;
 
-    fn next(&mut self) -> Option<Option<&'a str>> {
-        if self.i >= self.data.encoded_values.len() { return None }
-        let encoded_value = &self.data.encoded_values[self.i];
-        let value = &self.data.mapping[*encoded_value as usize];
+//     fn next(&mut self) -> Option<Option<&'a str>> {
+//         if self.i >= self.data.encoded_values.len() { return None }
+//         let encoded_value = &self.data.encoded_values[self.i];
+//         let value = &self.data.mapping[*encoded_value as usize];
 
-        self.i += 1;
-        Some(value.as_ref().map(|s| &**s))
-    }
-}
+//         self.i += 1;
+//         Some(value.as_ref().map(|s| &**s))
+//     }
+// }
 
-impl ColumnData for DictEncodedStrings {
-    fn iter<'a>(&'a self) -> ColIter<'a> {
-        // let iter = self.encoded_values.iter().map(|i| &self.mapping[*i as usize]).map(|o| o.as_ref().map(|x| &**x)).map(ValueType::from); 
-        let iter = DictEncodedStringsIterator { data: self, i: 0 }.map(ValueType::from);
-        ColIter{iter: Box::new(iter)}
-    }
-}
+// impl<S: IndexStorage> ColumnData for DictEncodedStrings<S> {
+//     fn iter<'a>(&'a self) -> ColIter<'a> {
+//         // let iter = self.encoded_values.iter().map(|i| &self.mapping[*i as usize]).map(|o| o.as_ref().map(|x| &**x)).map(ValueType::from); 
+//         let iter = DictEncodedStringsIterator { data: self, i: 0 }.map(ValueType::from);
+//         ColIter{iter: Box::new(iter)}
+//     }
+// }
 
-impl HeapSizeOf for DictEncodedStrings {
-    fn heap_size_of_children(&self) -> usize {
-        self.mapping.heap_size_of_children() + self.encoded_values.heap_size_of_children()
-    }
-}
+// impl<S: IndexStorage> HeapSizeOf for DictEncodedStrings<S> {
+//     fn heap_size_of_children(&self) -> usize {
+//         self.mapping.heap_size_of_children() + self.encoded_values.heap_size_of_children()
+//     }
+// }
 
