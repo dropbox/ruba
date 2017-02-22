@@ -62,7 +62,7 @@ fn print_ingestion_stats(batches: &Vec<Batch>, starttime: f64) {
     }
 }
 
-fn repl(datasource: &Vec<Batch>) {
+fn repl<'a, 'b>(datasource: &'a Vec<Batch<'b>>) where 'a: 'b {
     let mut rl = rustyline::Editor::<()>::new();
     rl.load_history(".ruba_history").ok();
     while let Ok(mut s) = rl.readline("ruba> ") {

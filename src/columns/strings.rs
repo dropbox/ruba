@@ -16,7 +16,7 @@ use std::marker::PhantomData;
 
 pub const MAX_UNIQUE_STRINGS: usize = 10000;
 
-pub fn build_string_column(values: Vec<Option<Rc<String>>>, unique_values: UniqueValues<Option<Rc<String>>>) -> Box<ColumnData> {
+pub fn build_string_column<'a>(values: Vec<Option<Rc<String>>>, unique_values: UniqueValues<Option<Rc<String>>>) -> Box<ColumnData<'a>> {
     if let Some(u) = unique_values.get_values() {
         // Box::new(DictEncodedStrings::<Vec<u8>>::from_strings(&values, u));
         panic!("TODO")
@@ -63,8 +63,8 @@ impl StringPacker {
     }
 }
 
-impl ColumnData for StringPacker {
-    fn iter<'a>(&'a self) -> ColIter<'a> {
+impl<'a> ColumnData<'a> for StringPacker {
+    fn iter(&'a self) -> ColIter<'a> {
         let iter = self.iter().map(|s| ValueType::Str(s));
         ColIter{iter: Box::new(iter)}
     }
@@ -171,7 +171,7 @@ impl<'a, I, S> Iterator for DictEncodedStringsIterator<'a, I, S> where S: Packed
     }
 }
 
-impl<'a, I, S> ColumnData for DictEncodedStrings<I, S> where S: PackedStore<'a, I>, I: PrimInt {
+impl<'a, I, S> ColumnData<'a> for DictEncodedStrings<I, S> where S: PackedStore<'a, I>, I: PrimInt {
     fn iter(&'a self) -> ColIter<'a> {
         // let iter = self.encoded_values.iter().map(|i| &self.mapping[*i as usize]).map(|o| o.as_ref().map(|x| &**x)).map(ValueType::from); 
         let iter = DictEncodedStringsIterator { data: self, iter: self.encoded_values.iter() }.map(ValueType::from);

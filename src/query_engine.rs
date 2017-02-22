@@ -23,18 +23,18 @@ pub struct Query<'a> {
     pub limit: Option<LimitClause>,
 }
 
-pub struct CompiledQuery<'a> {
-    subqueries: Vec<CompiledSingleBatchQuery<'a>>,
+pub struct CompiledQuery<'a, 'b> {
+    subqueries: Vec<CompiledSingleBatchQuery<'a, 'b>>,
     output_colnames: Vec<Rc<String>>,
     aggregate: Vec<Aggregator>,
     limit: Option<LimitClause>,
 }
 
-struct CompiledSingleBatchQuery<'a> {
+struct CompiledSingleBatchQuery<'a, 'b> {
     select: Vec<Expr<'a>>,
     filter: Expr<'a>,
     aggregate: Vec<(Aggregator, Expr<'a>)>,
-    coliter: Vec<ColIter<'a>>,
+    coliter: Vec<ColIter<'b>>,
 }
 
 pub struct QueryResult<'a> {
@@ -82,7 +82,7 @@ impl Add for QueryStats {
 }
 
 
-impl<'a> CompiledQuery<'a> {
+impl<'a, 'b> CompiledQuery<'a, 'b> {
     pub fn run(&mut self) -> QueryResult {
         let colnames = self.output_colnames.clone();
         let (result_rows, stats) = if self.aggregate.len() == 0 {
@@ -133,7 +133,7 @@ impl<'a> CompiledQuery<'a> {
     }
 }
 
-impl<'a> CompiledSingleBatchQuery<'a> {
+impl<'a, 'b> CompiledSingleBatchQuery<'a, 'b> {
     fn run_select_query(&mut self) -> SelectSubqueryResult {
         let mut result = Vec::new();
         let mut record = Vec::with_capacity(self.coliter.len());
@@ -191,7 +191,7 @@ impl<'a> CompiledSingleBatchQuery<'a> {
 }
 
 impl<'a> Query<'a> {
-    pub fn compile(&'a self, source: &'a Vec<Batch>) -> CompiledQuery<'a> {
+    pub fn compile<'b>(&'a self, source: &'a Vec<Batch<'b>>) -> CompiledQuery<'a, 'b> where 'a: 'b {
         let subqueries = source.iter().map(|batch| self.compile_for_batch(batch)).collect();
         let limit = self.limit.clone();
         CompiledQuery {
@@ -202,7 +202,7 @@ impl<'a> Query<'a> {
         }
     }
 
-    fn compile_for_batch(&'a self, source: &'a Batch) -> CompiledSingleBatchQuery<'a> {
+    fn compile_for_batch<'b>(&'a self, source: &'a Batch<'b>) -> CompiledSingleBatchQuery<'a, 'b> where 'a: 'b {
         let referenced_cols = self.find_referenced_cols();
         let efficient_source: Vec<&Column> = source.cols.iter().filter(|col| referenced_cols.contains(&col.get_name().to_string())).collect();
         let coliter = efficient_source.iter().map(|col| col.iter()).collect();

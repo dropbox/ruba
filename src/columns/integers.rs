@@ -9,7 +9,7 @@ pub struct IntegerColumn {
 }
 
 impl IntegerColumn {
-    pub fn new(mut values: Vec<i64>, min: i64, max: i64) -> Box<ColumnData> {
+    pub fn new<'a>(mut values: Vec<i64>, min: i64, max: i64) -> Box<ColumnData<'a>> {
         if max - min <= u8::MAX as i64 {
             Box::new(IntegerOffsetColumn::<u8>::new(values, min))
         } else if max - min <= u16::MAX as i64 {
@@ -25,8 +25,8 @@ impl IntegerColumn {
     }
 }
 
-impl ColumnData for IntegerColumn {
-    fn iter<'a>(&'a self) -> ColIter<'a> {
+impl<'a> ColumnData<'a> for IntegerColumn {
+    fn iter(&'a self) -> ColIter<'a> {
         let iter = self.values.iter().map(|&i| ValueType::Integer(i));
         ColIter{iter: Box::new(iter)}
     }
@@ -52,8 +52,8 @@ impl<T: IntLike> IntegerOffsetColumn<T> {
     }
 }
 
-impl<T: IntLike> ColumnData for IntegerOffsetColumn<T> {
-    fn iter<'a>(&'a self) -> ColIter<'a> {
+impl<'a, T: IntLike> ColumnData<'a> for IntegerOffsetColumn<T> {
+    fn iter(&'a self) -> ColIter<'a> {
         let offset = self.offset;
         let iter = self.values.iter().map(move |i| ValueType::Integer(i.to_i64().unwrap() + offset));
         ColIter { iter: Box::new(iter) }
